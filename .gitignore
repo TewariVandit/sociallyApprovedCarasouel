@@ -1,0 +1,49 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependency directories
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Optional build output
+dist/
+build/
+
+# Environment variables
+.env
+client/.env
+server/.env
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor-specific
+.vscode/
+.idea/
+*.swp
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+
+# Parcel cache
+.cache/
+.parcel-cache/
+
+# Output of 'npm pack'
+*.tgz
+
+# Debug files
+debug.log
+
+# React build
+client/build/
