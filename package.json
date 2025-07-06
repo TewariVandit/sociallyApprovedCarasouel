@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node social-carousel-backend/server.js",
     "dev": "nodemon social-carousel-backend/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
