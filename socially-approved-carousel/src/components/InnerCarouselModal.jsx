@@ -1,145 +1,176 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './InnerCarouselModal.css';
-import { FaHeart, FaRegHeart, FaWhatsapp, FaInstagram, FaLink, FaArrowLeft, FaArrowRight } from 'react-icons/fa';
+import {
+  FaHeart,
+  FaRegHeart,
+  FaWhatsapp,
+  FaInstagram,
+  FaLink,
+  FaArrowLeft,
+  FaArrowRight
+} from 'react-icons/fa';
 import { CiShare2 } from 'react-icons/ci';
 
-export default function InnerCarouselModal({ videos, startIndex, onClose }) {
+/**
+ * API base resolves automatically:
+ *  - in development `VITE_API_BASE_URL` can be `http://localhost:5000`
+ *  - in production keep it empty string (same origin)
+ */
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
+export default function InnerCarouselModal({ videos: propVideos, startIndex = 0, onClose }) {
+  /** ------------------------------------------------------------------
+   * LOCAL STATE & REFS
+   * -----------------------------------------------------------------*/
   const [currentIndex, setCurrentIndex] = useState(startIndex);
-  const videoRefs = useRef([]);
+  const [localVideos, setLocalVideos] = useState(() => [...propVideos]);
+
+  const videoRefs = useRef([]); // filled dynamically below
+  videoRefs.current = Array(localVideos.length);
+
   const [muted, setMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const [playing, setPlaying] = useState(true);
   const [showToast, setShowToast] = useState(false);
-  const [localVideos, setLocalVideos] = useState([...videos]);
-  const [shareCount, setShareCount] = useState(videos[startIndex]?.shares.length || 0);
   const [showShareModal, setShowShareModal] = useState(false);
   const [transitioning, setTransitioning] = useState(false);
 
-  const isMobile = window.innerWidth <= 600;
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 600;
 
-  const currentVideo = localVideos[currentIndex];
-  const currentVideoId = currentVideo?._id || currentVideo?.id;
-  const likedVideos = JSON.parse(localStorage.getItem('likedVideos')) || [];
+  const currentVideo = localVideos[currentIndex] || {};
+  const currentVideoId = currentVideo._id || currentVideo.id;
+
+  /** Likes -----------------------------------------------------------*/
+  const [likedVideos, setLikedVideos] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('likedVideos')) || [];
+    } catch (err) {
+      return [];
+    }
+  });
   const liked = likedVideos.includes(currentVideoId);
-  const likeCount = currentVideo?.likes || 0;
+  const [likeCount, setLikeCount] = useState(currentVideo.likes || 0);
 
-  useEffect(() => {
-    if (!isMobile) {
-      setShareCount(currentVideo?.shares?.length || 0);
-    }
-  }, [currentIndex, localVideos]);
+  /** Shares ----------------------------------------------------------*/
+  const [shareCount, setShareCount] = useState(currentVideo.shares?.length || 0);
 
-  useEffect(() => {
-    if (!isMobile) {
-      playOnlyCurrent();
-    }
-  }, [currentIndex, playing, muted]);
-
+  /** ------------------------------------------------------------------
+   * HELPERS
+   * -----------------------------------------------------------------*/
   const playOnlyCurrent = () => {
     videoRefs.current.forEach((vid, i) => {
-      if (vid) {
-        if (i === currentIndex) {
-          playing ? vid.play() : vid.pause();
-          vid.muted = muted;
-        } else {
-          vid.pause();
-        }
+      if (!vid) return;
+      if (i === currentIndex) {
+        playing ? vid.play().catch(() => {}) : vid.pause();
+        vid.muted = muted;
+      } else {
+        vid.pause();
       }
     });
   };
 
-  const handleShare = () => setShowShareModal(true);
+  /** ------------------------------------------------------------------
+   * SIDE‑EFFECTS
+   * -----------------------------------------------------------------*/
+  // keep like/share count in sync when currentIndex changes
+  useEffect(() => {
+    setLikeCount(currentVideo.likes || 0);
+    setShareCount(currentVideo.shares?.length || 0);
+  }, [currentIndex, localVideos]);
 
-  const incrementShare = async (platform) => {
-    const updatedVideos = [...localVideos];
-    updatedVideos[currentIndex] = {
-      ...updatedVideos[currentIndex],
-      shares: [...(updatedVideos[currentIndex].shares || []), { platform, sharedAt: Date.now() }],
-    };
-    setLocalVideos(updatedVideos);
-    setShareCount(updatedVideos[currentIndex].shares.length);
-    localStorage.setItem('videoData', JSON.stringify(updatedVideos));
+  // auto‑play only current (desktop)
+  useEffect(() => {
+    if (!isMobile) playOnlyCurrent();
+  }, [currentIndex, playing, muted, isMobile]);
 
+  // intersection observer for mobile reels
+  useEffect(() => {
+    if (!isMobile) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          const video = entry.target;
+          if (entry.isIntersecting) {
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+        });
+      },
+      { threshold: 0.8 }
+    );
+    videoRefs.current.forEach(v => v && observer.observe(v));
+    return () => videoRefs.current.forEach(v => v && observer.unobserve(v));
+  }, [isMobile]);
+
+  /** ------------------------------------------------------------------
+   * API ACTIONS
+   * -----------------------------------------------------------------*/
+  const post = async (url, body) => {
     try {
-      await fetch(`https://sociallyapprovedcarasouel.onrender.com/api/videos/${currentVideoId}/share`, {
+      await fetch(`${API_BASE}${url}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId: currentVideoId, platform }),
+        body: JSON.stringify(body)
       });
     } catch (err) {
-      console.error('Failed to record share on server:', err);
+      console.error(`POST ${url} failed:`, err);
     }
   };
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(currentVideo.videoUrl);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
+  const incrementShare = async platform => {
+    setLocalVideos(vs => {
+      const updated = [...vs];
+      updated[currentIndex] = {
+        ...updated[currentIndex],
+        shares: [...(updated[currentIndex].shares || []), { platform, sharedAt: Date.now() }]
+      };
+      localStorage.setItem('videoData', JSON.stringify(updated));
+      return updated;
+    });
+    setShareCount(c => c + 1);
+    post(`/api/videos/${currentVideoId}/share`, { videoId: currentVideoId, platform });
   };
 
-  const toggleLike = async () => {
-    const isLiked = likedVideos.includes(currentVideoId);
-    let updatedLikedVideos;
-    let updatedCount = likeCount;
+  const toggleLike = (idx = currentIndex) => {
+    const vid = localVideos[idx];
+    if (!vid) return;
+    const videoId = vid._id || vid.id;
 
-    if (isLiked) {
-      updatedLikedVideos = likedVideos.filter(id => id !== currentVideoId);
-      updatedCount -= 1;
-    } else {
-      updatedLikedVideos = [...likedVideos, currentVideoId];
-      updatedCount += 1;
-    }
+    setLikedVideos(prev => {
+      const isLiked = prev.includes(videoId);
+      const updatedLiked = isLiked ? prev.filter(id => id !== videoId) : [...prev, videoId];
+      localStorage.setItem('likedVideos', JSON.stringify(updatedLiked));
+      return updatedLiked;
+    });
 
-    localStorage.setItem('likedVideos', JSON.stringify(updatedLikedVideos));
+    setLocalVideos(vs => {
+      const updated = [...vs];
+      const isLiked = likedVideos.includes(videoId);
+      updated[idx] = { ...updated[idx], likes: (updated[idx].likes || 0) + (isLiked ? -1 : 1) };
+      localStorage.setItem('videoData', JSON.stringify(updated));
+      return updated;
+    });
 
-    const updatedVideos = [...localVideos];
-    updatedVideos[currentIndex] = {
-      ...updatedVideos[currentIndex],
-      likes: updatedCount,
-    };
-    setLocalVideos(updatedVideos);
-    localStorage.setItem('videoData', JSON.stringify(updatedVideos));
-
-    try {
-      await fetch(`https://sociallyapprovedcarasouel.onrender.com/api/videos/like`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoId: currentVideoId, liked: !isLiked }),
-      });
-    } catch (err) {
-      console.error('Failed to update like on server:', err);
-    }
+    post(`/api/videos/like`, { videoId, liked: !likedVideos.includes(videoId) });
   };
 
+  /** ------------------------------------------------------------------
+   * VIDEO HANDLERS
+   * -----------------------------------------------------------------*/
   const handleTimeUpdate = () => {
-    const video = videoRefs.current[currentIndex];
-    if (video && video.duration) {
-      const percentage = (video.currentTime / video.duration) * 100;
-      setProgress(percentage);
-    }
+    const v = videoRefs.current[currentIndex];
+    if (v?.duration) setProgress((v.currentTime / v.duration) * 100);
   };
 
-  const toggleMute = () => {
-    const video = videoRefs.current[currentIndex];
-    if (video) {
-      video.muted = !muted;
-      setMuted(!muted);
-    }
-  };
-
-  const togglePlay = () => {
-    setPlaying(!playing);
-    const video = videoRefs.current[currentIndex];
-    if (video) {
-      playing ? video.pause() : video.play();
-    }
-  };
+  const toggleMute = () => setMuted(m => !m);
+  const togglePlay = () => setPlaying(p => !p);
 
   const nextVideo = () => {
-    if (currentIndex < videos.length - 1) {
+    if (currentIndex < localVideos.length - 1) {
       setTransitioning(true);
       setTimeout(() => {
-        setCurrentIndex(currentIndex + 1);
+        setCurrentIndex(i => i + 1);
         setProgress(0);
         setTransitioning(false);
       }, 300);
@@ -150,67 +181,49 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
     if (currentIndex > 0) {
       setTransitioning(true);
       setTimeout(() => {
-        setCurrentIndex(currentIndex - 1);
+        setCurrentIndex(i => i - 1);
         setProgress(0);
         setTransitioning(false);
       }, 300);
     }
   };
 
-  useEffect(() => {
-    if (!isMobile) return;
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          const video = entry.target;
-          if (entry.isIntersecting) {
-            video.play();
-          } else {
-            video.pause();
-          }
-        });
-      },
-      { threshold: 0.8 }
-    );
+  /** ------------------------------------------------------------------
+   * RENDER HELPERS
+   * -----------------------------------------------------------------*/
+  const renderSideVideo = (video, refCb, extraClass = "") => (
+    <div className={`side-video ${extraClass}`}>
+      <video
+        src={video.videoUrl.replace('http://', 'https://')}
+        muted
+        loop
+        playsInline
+        ref={refCb}
+        className="preview-video"
+      />
+    </div>
+  );
 
-    videoRefs.current.forEach(video => {
-      if (video) observer.observe(video);
-    });
-
-    return () => {
-      videoRefs.current.forEach(video => {
-        if (video) observer.unobserve(video);
-      });
-    };
-  }, [isMobile]);
-
+  /** ------------------------------------------------------------------
+   * JSX
+   * -----------------------------------------------------------------*/
   return (
     <div className="modal-overlay">
       <div className="modal-content">
         <button className="close-btn" onClick={onClose}>×</button>
 
+        {/* DESKTOP VIEW */}
         {!isMobile && (
           <>
             <button className="nav-left" onClick={prevVideo} disabled={currentIndex === 0}><FaArrowLeft /></button>
-            <button className="nav-right" onClick={nextVideo} disabled={currentIndex === videos.length - 1}><FaArrowRight /></button>
+            <button className="nav-right" onClick={nextVideo} disabled={currentIndex === localVideos.length - 1}><FaArrowRight /></button>
 
             <div className="video-layout">
-              {currentIndex > 0 && (
-                <div className="side-video left">
-                  <video
-                    src={videos[currentIndex - 1].videoUrl}
-                    muted
-                    loop
-                    playsInline
-                    ref={el => videoRefs.current[currentIndex - 1] = el}
-                    className="preview-video"
-                  />
-                </div>
-              )}
+              {currentIndex > 0 && renderSideVideo(localVideos[currentIndex - 1], el => videoRefs.current[currentIndex - 1] = el, 'left')}
 
               <div className="center-video-container">
                 <video
-                  src={videos[currentIndex].videoUrl}
+                  src={currentVideo.videoUrl.replace('http://', 'https://')}
                   muted={muted}
                   autoPlay
                   loop
@@ -218,24 +231,17 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
                   onTimeUpdate={handleTimeUpdate}
                   ref={el => videoRefs.current[currentIndex] = el}
                   className={`center-video ${transitioning ? 'fade-out' : 'fade-in'}`}
-                  poster={videos[currentIndex].thumbnailUrl}
+                  poster={currentVideo.thumbnailUrl}
                 />
 
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${progress}%` }}></div>
-                </div>
+                <div className="progress-bar"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
 
-                <div className="top-left">
-                  <button onClick={togglePlay}>{playing ? '⏸' : '▶️'}</button>
-                </div>
-
-                <div className="top-right">
-                  <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
-                </div>
+                <div className="top-left"><button onClick={togglePlay}>{playing ? '⏸' : '▶️'}</button></div>
+                <div className="top-right"><button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button></div>
 
                 <div className="right-side-icons">
                   <span>
-                    <button className="icon-btn" onClick={toggleLike}>
+                    <button className="icon-btn" onClick={() => toggleLike(currentIndex)}>
                       {liked ? <FaHeart color="red" size={24} /> : <FaRegHeart color="white" size={24} />}
                     </button>
                     <p className="icon-count">{likeCount}</p>
@@ -247,35 +253,23 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
                 </div>
               </div>
 
-              {currentIndex < videos.length - 1 && (
-                <div className="side-video right">
-                  <video
-                    src={videos[currentIndex + 1].videoUrl}
-                    muted
-                    loop
-                    playsInline
-                    ref={el => videoRefs.current[currentIndex + 1] = el}
-                    className="preview-video"
-                  />
-                </div>
-              )}
+              {currentIndex < localVideos.length - 1 && renderSideVideo(localVideos[currentIndex + 1], el => videoRefs.current[currentIndex + 1] = el, 'right')}
             </div>
           </>
         )}
 
+        {/* MOBILE VIEW */}
         {isMobile && (
           <div className="mobile-reel-wrapper">
-            <button className="close-btn" onClick={onClose}>×</button>
-            {videos.map((video, index) => {
-              const videoId = video._id || video.id;
-              const liked = likedVideos.includes(videoId);
-              const likeCount = video.likes || 0;
-
+            {localVideos.map((video, idx) => {
+              const id = video._id || video.id;
+              const isLiked = likedVideos.includes(id);
+              const lc = video.likes || 0;
               return (
-                <div className="reel-container" key={index}>
+                <div className="reel-container" key={id || idx}>
                   <video
-                    src={video.videoUrl}
-                    ref={el => videoRefs.current[index] = el}
+                    src={video.videoUrl.replace('http://', 'https://')}
+                    ref={el => videoRefs.current[idx] = el}
                     className="reel-video"
                     muted
                     loop
@@ -283,23 +277,15 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
                     playsInline
                     poster={video.thumbnailUrl}
                   />
-                  <div className="top-left">
-                    <button onClick={togglePlay}>{playing ? '⏸' : '▶️'}</button>
-                  </div>
-                  <div className="reel-progress">
-                    <div className="fill" style={{ width: `${progress}%` }}></div>
-                  </div>
-
-                  <div className="top-right">
-                    <button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button>
-                  </div>
-
+                  <div className="top-left"><button onClick={togglePlay}>{playing ? '⏸' : '▶️'}</button></div>
+                  <div className="reel-progress"><div className="fill" style={{ width: `${progress}%` }} /></div>
+                  <div className="top-right"><button onClick={toggleMute}>{muted ? '🔇' : '🔊'}</button></div>
                   <div className="right-side-icons">
                     <span>
-                      <button className="icon-btn" onClick={toggleLike}>
-                        {liked ? <FaHeart color="red" size={24} /> : <FaRegHeart color="white" size={24} />}
+                      <button className="icon-btn" onClick={() => toggleLike(idx)}>
+                        {isLiked ? <FaHeart color="red" size={24} /> : <FaRegHeart color="white" size={24} />}
                       </button>
-                      <p className="icon-count">{likeCount}</p>
+                      <p className="icon-count">{lc}</p>
                     </span>
                     <span>
                       <button className="icon-btn" onClick={handleShare}><CiShare2 /></button>
@@ -312,15 +298,13 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
           </div>
         )}
 
-        {showToast && (
-          <div className="toast-notification">Link copied to clipboard!</div>
-        )}
+        {showToast && <div className="toast-notification">Link copied to clipboard!</div>}
 
         {showShareModal && (
           <div className="share-modal">
             <div className="share-header">
               <p>Share</p>
-              <button className='share-close' onClick={() => setShowShareModal(false)}>×</button>
+              <button className="share-close" onClick={() => setShowShareModal(false)}>×</button>
             </div>
             <div className="share-options">
               <button className="share-icon" onClick={() => {
@@ -335,7 +319,9 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
 
               <button className="share-icon" onClick={() => {
                 incrementShare('copy');
-                copyLink();
+                navigator.clipboard.writeText(currentVideo.videoUrl);
+                setShowToast(true);
+                setTimeout(() => setShowToast(false), 3000);
               }}><FaLink size={28} /></button>
             </div>
           </div>
