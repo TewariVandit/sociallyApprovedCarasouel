@@ -12,11 +12,12 @@ const useFetchVideos = () => {
     if (cachedVideos) {
       setVideos(JSON.parse(cachedVideos));
       setLoading(false);
-      console.log('Loaded videos from localStorage'); // ✅ Confirm it's local
+      console.log('Loaded videos from localStorage');
     } else {
       const fetchVideos = async () => {
         try {
-          const res = await axios.get('http://localhost:5000/api/videos');
+          // ✅ Use relative path — this works on both dev & Render
+          const res = await axios.get('/api/videos');
           setVideos(res.data);
           localStorage.setItem('videoData', JSON.stringify(res.data));
           console.log('Fetched and cached videos:', res.data);
