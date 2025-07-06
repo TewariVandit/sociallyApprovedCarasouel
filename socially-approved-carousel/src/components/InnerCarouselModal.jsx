@@ -61,7 +61,7 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
     localStorage.setItem('videoData', JSON.stringify(updatedVideos));
 
     try {
-      await fetch(`http://localhost:5000/api/videos/${currentVideoId}/share`, {
+      await fetch(`/api/videos/${currentVideoId}/share`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoId: currentVideoId, platform }),
@@ -101,7 +101,7 @@ export default function InnerCarouselModal({ videos, startIndex, onClose }) {
     localStorage.setItem('videoData', JSON.stringify(updatedVideos));
 
     try {
-      await fetch(`http://localhost:5000/api/videos/like`, {
+      await fetch(`/api/videos/like`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoId: currentVideoId, liked: !isLiked }),
